@@ -21,6 +21,13 @@
 #define ERADICATE2_SPEEDSAMPLES 20
 #define ERADICATE2_MAX_SCORE 40
 
+struct MatchEntry {
+	cl_uchar score;
+	cl_uchar padding[3];
+};
+
+static const size_t MATCH_QUEUE_SIZE = 64;
+
 class Dispatcher {
 	private:
 		class OpenCLException : public std::runtime_error {
@@ -33,7 +40,7 @@ class Dispatcher {
 		};
 
 		struct Device {
-			static cl_command_queue createQueue(cl_context & clContext, cl_device_id & clDeviceId);
+			static cl_command_queue createQueue(cl_context & clContext, cl_device_id & clDeviceId, const bool enableProfiling);
 			static cl_kernel createKernel(cl_program & clProgram, const std::string s);
 
 			Device(Dispatcher & parent, cl_context & clContext, cl_program & clProgram, cl_device_id clDeviceId, const size_t worksizeLocal, const size_t size, const size_t index);
@@ -51,16 +58,27 @@ class Dispatcher {
 
 			CLMemory<result> m_memResult;
 			CLMemory<mode> m_memMode;
+			CLMemory<cl_uint> m_memHasResult;
+			CLMemory<cl_uint> m_memMatchCount;
+			CLMemory<MatchEntry> m_memMatches;
 
 			cl_uint m_round;
+			const cl_uint m_roundsPerKernel;
+			size_t m_dispatchCount;
+			const size_t m_pollInterval;
+			cl_ulong m_totalKernelNs;
+			cl_ulong m_totalReadNs;
+			size_t m_kernelProfileCount;
+			size_t m_readProfileCount;
 		};
 
 	public:
-		Dispatcher(cl_context & clContext, cl_program & clProgram, const size_t worksizeMax, const size_t size);
+		Dispatcher(cl_context & clContext, cl_program & clProgram, const size_t worksizeMax, const size_t size, const bool profile = false, const size_t roundsPerKernel = 1);
 		~Dispatcher();
 
 		void addDevice(cl_device_id clDeviceId, const size_t worksizeLocal, const size_t index);
 		void run(const mode & mode);
+		void enableLeadingThresholdMode(const cl_uchar threshold);
 
 	private:
 		void deviceDispatch(Device & d);
@@ -69,9 +87,11 @@ class Dispatcher {
 		void enqueueKernelDevice(Device & d, cl_kernel & clKernel, size_t worksizeGlobal, cl_event * pEvent);
 
 		void printSpeed();
+		void printProfilingReport() const;
 
 	private:
 		static void CL_CALLBACK staticCallback(cl_event event, cl_int event_command_exec_status, void * user_data);
+		static void CL_CALLBACK kernelProfilingCallback(cl_event event, cl_int event_command_exec_status, void * user_data);
 
 		static std::string formatSpeed(double s);
 
@@ -81,6 +101,7 @@ class Dispatcher {
 		const size_t m_worksizeMax;
 		const size_t m_size;
 		cl_uchar m_clScoreMax;
+		const cl_uint m_roundsPerKernel;
 		std::vector<Device *> m_vDevices;
 
 		cl_event m_eventFinished;
@@ -92,6 +113,10 @@ class Dispatcher {
 		unsigned int m_countPrint;
 		unsigned int m_countRunning;
 		bool m_quit;
+		bool m_collectAllLeading;
+		cl_uchar m_thresholdScore;
+		bool m_profile;
+		bool m_profileReported;
 };
 
 #endif /* HPP_DISPATCHER */

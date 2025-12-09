@@ -64,6 +64,9 @@ mode ModeFactory::range(const cl_uchar min, const cl_uchar max) {
 	r.function = ModeFunction::Range;
 	r.data1[0] = min;
 	r.data2[0] = max;
+	for (int i = 0; i < 16; ++i) {
+		r.data2[i + 1] = (i >= min && i <= max) ? 1 : 0;
+	}
 	return r;
 }
 
@@ -80,6 +83,9 @@ mode ModeFactory::leadingRange(const cl_uchar min, const cl_uchar max) {
 	r.function = ModeFunction::LeadingRange;
 	r.data1[0] = min;
 	r.data2[0] = max;
+	for (int i = 0; i < 16; ++i) {
+		r.data2[i + 1] = (i >= min && i <= max) ? 1 : 0;
+	}
 	return r;
 }
 

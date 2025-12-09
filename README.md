@@ -24,6 +24,7 @@ Basic modes:
 Modes with arguments:
 ```
 --leading <single hex>  Score on hashes leading with given hex character.
+--leading-threshold <number>  Minimum leading score to display results (use with --leading).
 --matching <hex string> Score on hashes matching given hex string.
 ```
 
@@ -53,11 +54,17 @@ Tweaking:
 -W, --work-max <size>   Set OpenCL maximum work size. [default = -i * -I]
 -S, --size <size>       Set number of salts tried per loop.
 		    [default = 16777216]
+--rounds <count>        Set number of rounds per kernel dispatch. [default = 1]
 ```
 
 Examples:
 ```
 ./address-miner --leading 0
 ./address-miner --leading-any
+```
+
+Profiling:
+```
+--profile               Enable kernel/read profiling output (shows average time once the first sample is collected).
 ```
 

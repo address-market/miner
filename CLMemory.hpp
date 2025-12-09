@@ -51,6 +51,26 @@ template<typename T> class CLMemory {
 			}
 		}
 
+	void readRange(const bool bBlock, const size_t offset, const size_t count, T * const pData, cl_event * pEvent = NULL) const {
+		const cl_bool block = bBlock ? CL_TRUE : CL_FALSE;
+		const size_t byteOffset = sizeof(T) * offset;
+		const size_t byteCount = sizeof(T) * count;
+		auto res = clEnqueueReadBuffer(m_clQueue, m_clMem, block, byteOffset, byteCount, pData, 0, NULL, pEvent);
+		if(res != CL_SUCCESS) {
+			throw std::runtime_error("clEnqueueReadBuffer failed - " + lexical_cast::write(res));
+		}
+	}
+
+	void writeRange(const bool bBlock, const size_t offset, const size_t count, T * const pData, cl_event * pEvent = NULL) const {
+		const cl_bool block = bBlock ? CL_TRUE : CL_FALSE;
+		const size_t byteOffset = sizeof(T) * offset;
+		const size_t byteCount = sizeof(T) * count;
+		auto res = clEnqueueWriteBuffer(m_clQueue, m_clMem, block, byteOffset, byteCount, pData, 0, NULL, pEvent);
+		if(res != CL_SUCCESS) {
+			throw std::runtime_error("clEnqueueWriteBuffer failed - " + lexical_cast::write(res));
+		}
+	}
+
 		T * const & data() const {
 			return m_pData;
 		}

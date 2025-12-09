@@ -9,6 +9,8 @@
 #include <random>
 #include <map>
 #include <set>
+#include <chrono>
+#include <thread>
 
 #if defined(__APPLE__) || defined(__MACOSX)
 #include <OpenCL/cl.h>
@@ -186,10 +188,13 @@ int main(int argc, char * * argv) {
 		bool bModeNumbers = false;
 		std::string strModeLeading;
 		std::string strModeMatching;
+		size_t leadingThreshold = 0;
 		bool bModeLeadingRange = false;
+		size_t roundsPerKernel = 1;
 		bool bModeRange = false;
 		bool bModeMirror = false;
 		bool bModeDoubles = false;
+		bool bProfile = false;
 		int rangeMin = 0;
 		int rangeMax = 0;
 		std::vector<size_t> vDeviceSkipIndex;
@@ -207,11 +212,14 @@ int main(int argc, char * * argv) {
 		argp.addSwitch('3', "numbers", bModeNumbers);
 		argp.addSwitch('4', "leading", strModeLeading);
 		argp.addSwitch('5', "matching", strModeMatching);
+		argp.addSwitch('T', "leading-threshold", leadingThreshold);
 		argp.addSwitch('6', "leading-range", bModeLeadingRange);
 		argp.addSwitch('7', "range", bModeRange);
 		argp.addSwitch('8', "mirror", bModeMirror);
 		argp.addSwitch('9', "leading-doubles", bModeDoubles);
 		argp.addSwitch('l', "leading-any", bModeLeadingAny);
+		argp.addSwitch('p', "profile", bProfile);
+		argp.addSwitch('r', "rounds", roundsPerKernel);
 		argp.addSwitch('m', "min", rangeMin);
 		argp.addSwitch('M', "max", rangeMax);
 		argp.addMultiSwitch('s', "skip", vDeviceSkipIndex);
@@ -263,6 +271,8 @@ int main(int argc, char * * argv) {
 			std::cout << g_strHelp << std::endl;
 			return 0;
 		}
+
+		const cl_uchar clLeadingThreshold = static_cast<cl_uchar>(std::min<size_t>(leadingThreshold, ERADICATE2_MAX_SCORE));
 
 		std::vector<cl_device_id> vFoundDevices = getAllDevices();
 		std::vector<cl_device_id> vDevices;
@@ -334,7 +344,25 @@ int main(int argc, char * * argv) {
 		std::cout << "  Building program..." << std::flush;
 
 		const std::string strBuildOptions = "-D ERADICATE2_MAX_SCORE=" + lexical_cast::write(ERADICATE2_MAX_SCORE) + " -D ERADICATE2_INITHASH=" + strPreprocessorInitStructure;
-		if (printResult(clBuildProgram(clProgram, vDevices.size(), vDevices.data(), strBuildOptions.c_str(), NULL, NULL))) {
+		auto buildWithRetry = [&](const std::string & options) {
+			constexpr int maxAttempts = 3;
+			const auto delay = std::chrono::milliseconds(50);
+			cl_int err = CL_SUCCESS;
+			for (int attempt = 0; attempt < maxAttempts; ++attempt) {
+				err = clBuildProgram(clProgram, vDevices.size(), vDevices.data(), options.c_str(), NULL, NULL);
+				if (err == CL_SUCCESS) {
+					break;
+				}
+				if (err != CL_BUILD_PROGRAM_FAILURE) {
+					break;
+				}
+				std::this_thread::sleep_for(delay);
+			}
+			return err;
+		};
+
+		const cl_int buildErr = buildWithRetry(strBuildOptions);
+		if (printResult(buildErr)) {
 #ifdef ERADICATE2_DEBUG
 			std::cout << std::endl;
 			std::cout << "build log:" << std::endl;
@@ -352,9 +380,13 @@ int main(int argc, char * * argv) {
 
 		std::cout << std::endl;
 
-		Dispatcher d(clContext, clProgram, worksizeMax == 0 ? size : worksizeMax, size);
+		Dispatcher d(clContext, clProgram, worksizeMax == 0 ? size : worksizeMax, size, bProfile, roundsPerKernel);
 		for (auto & i : vDevices) {
 			d.addDevice(i, worksizeLocal, mDeviceIndex[i]);
+		}
+
+		if (clLeadingThreshold > 0 && mode.function == ModeFunction::Leading) {
+			d.enableLeadingThresholdMode(clLeadingThreshold);
 		}
 
 		d.run(mode);

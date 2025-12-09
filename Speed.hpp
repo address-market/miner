@@ -12,7 +12,7 @@ public:
 	typedef std::list<samplePair> sampleList;
 
 public:
-	Speed(const unsigned int intervalPrintMs = 500, const unsigned int intervalSampleMs = 10000);
+Speed(const unsigned int intervalPrintMs = 3000, const unsigned int intervalSampleMs = 10000);
 	~Speed();
 
 	void update(const unsigned int numPoints, const unsigned int indexDevice);

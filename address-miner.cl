@@ -14,6 +14,13 @@ typedef struct __attribute__((packed)) {
 	uint found;
 } result;
 
+#define MATCH_QUEUE_SIZE 64
+
+typedef struct {
+	uchar score;
+	uchar padding[3];
+} match_entry;
+
 #ifndef ERADICATE2_INITHASH
 #define ERADICATE2_INITHASH 0x000
 typedef union {
@@ -26,92 +33,98 @@ void sha3_keccakf(ethhash * const h)
 }
 #endif
 
-__kernel void eradicate2_iterate(__global result * const pResult, __global const mode * const pMode, const uchar scoreMax, const uint deviceIndex, const uint round);
-void eradicate2_result_update(const uchar * const hash, __global result * const pResult, const uchar score, const uchar scoreMax, const uint deviceIndex, const uint round);
-void eradicate2_score_leading(const uchar * const hash, __global result * const pResult, __global const mode * const pMode, const uchar scoreMax, const uint deviceIndex, const uint round);
-void eradicate2_score_benchmark(const uchar * const hash, __global result * const pResult, __global const mode * const pMode, const uchar scoreMax, const uint deviceIndex, const uint round);
-void eradicate2_score_zerobytes(const uchar * const hash, __global result * const pResult, __global const mode * const pMode, const uchar scoreMax, const uint deviceIndex, const uint round);
-void eradicate2_score_matching(const uchar * const hash, __global result * const pResult, __global const mode * const pMode, const uchar scoreMax, const uint deviceIndex, const uint round);
-void eradicate2_score_range(const uchar * const hash, __global result * const pResult, __global const mode * const pMode, const uchar scoreMax, const uint deviceIndex, const uint round);
-void eradicate2_score_leadingrange(const uchar * const hash, __global result * const pResult, __global const mode * const pMode, const uchar scoreMax, const uint deviceIndex, const uint round);
-void eradicate2_score_leadingany(const uchar * const hash, __global result * const pResult, __global const mode * const pMode, const uchar scoreMax, const uint deviceIndex, const uint round);
-void eradicate2_score_mirror(const uchar * const hash, __global result * const pResult, __global const mode * const pMode, const uchar scoreMax, const uint deviceIndex, const uint round);
-void eradicate2_score_doubles(const uchar * const hash, __global result * const pResult, __global const mode * const pMode, const uchar scoreMax, const uint deviceIndex, const uint round);
-
-__kernel void eradicate2_iterate(__global result * const pResult, __global const mode * const pMode, const uchar scoreMax, const uint deviceIndex, const uint round) {
-	ethhash h = { .q = { ERADICATE2_INITHASH } };
-
-	// Salt have index h.b[21:52] inclusive, which covers WORDS with index h.d[6:12] inclusive (they represent h.b[24:51] inclusive)
-	// We use three out of those six words to generate a unique salt value for each device, thread and round. We ignore any overflows
-	// and assume that there'll never be more than 2**32 devices, threads or rounds. Worst case scenario with default settings
-	// of 16777216 = 2**24 threads means the assumption fails after a device has tried 2**32 * 2**24 = 2**56 salts, enough to match
-	// 14 characters in the address! A GTX 1070 with speed of ~700*10**6 combinations per second would hit this target after ~3 years.
-	h.d[6] += deviceIndex; 
-	h.d[7] += get_global_id(0);
-	h.d[8] += round;
-
-	uchar salt[200];
-	for (int i = 0; i < 200; i++) {
-		salt[i] = h.b[i];
+inline bool thresholdStillReachable(const int currentScore, const int remainingNibbles, const uchar thresholdScore) {
+	if (thresholdScore == 0) {
+		return true;
 	}
 
-	// Hash
-	sha3_keccakf(&h);
+	return currentScore + remainingNibbles >= thresholdScore;
+}
 
-	h.b[0] = 0xd6;
-	h.b[1] = 0x94;
-	#pragma unroll
-	for (int i = 12; i < 42; i++) {
-		h.b[i - 10] = h.b[i];
-	}
-	h.b[22] = 0x01;
-	h.b[23] = 0x01; // padding
-	#pragma unroll
-	for (int i = 24; i < 200; i++) {
-		h.b[i] = 0;
-	}
-	sha3_keccakf(&h);
+__kernel void eradicate2_iterate(__global result * restrict const pResult, __global const mode * restrict const pMode, const uchar scoreMax, const uint deviceIndex, const uint round, __global volatile uint * restrict const pHasResult, __global volatile uint * restrict const pMatchCount, __global match_entry * restrict const pMatches, const uint roundsPerKernel, const uchar thresholdScore);
+void eradicate2_result_update(const uchar * const hash, __global result * restrict const pResult, __global volatile uint * restrict const pHasResult, __global volatile uint * restrict const pMatchCount, __global match_entry * restrict const pMatches, const uchar score, const uchar scoreMax, const uint deviceIndex, const uint round);
+void eradicate2_score_leading(const uchar * const hash, __global result * restrict const pResult, __global volatile uint * restrict const pHasResult, __global volatile uint * restrict const pMatchCount, __global match_entry * restrict const pMatches, __global const mode * restrict const pMode, const uchar scoreMax, const uint deviceIndex, const uint round, const uchar thresholdScore);
+void eradicate2_score_benchmark(const uchar * const hash, __global result * restrict const pResult, __global volatile uint * restrict const pHasResult, __global volatile uint * restrict const pMatchCount, __global match_entry * restrict const pMatches, __global const mode * restrict const pMode, const uchar scoreMax, const uint deviceIndex, const uint round, const uchar thresholdScore);
+void eradicate2_score_zerobytes(const uchar * const hash, __global result * restrict const pResult, __global volatile uint * restrict const pHasResult, __global volatile uint * restrict const pMatchCount, __global match_entry * restrict const pMatches, __global const mode * restrict const pMode, const uchar scoreMax, const uint deviceIndex, const uint round, const uchar thresholdScore);
+void eradicate2_score_matching(const uchar * const hash, __global result * restrict const pResult, __global volatile uint * restrict const pHasResult, __global volatile uint * restrict const pMatchCount, __global match_entry * restrict const pMatches, __global const mode * restrict const pMode, const uchar scoreMax, const uint deviceIndex, const uint round, const uchar thresholdScore);
+void eradicate2_score_range(const uchar * const hash, __global result * restrict const pResult, __global volatile uint * restrict const pHasResult, __global volatile uint * restrict const pMatchCount, __global match_entry * restrict const pMatches, __global const mode * restrict const pMode, const uchar scoreMax, const uint deviceIndex, const uint round, const uchar thresholdScore);
+void eradicate2_score_leadingrange(const uchar * const hash, __global result * restrict const pResult, __global volatile uint * restrict const pHasResult, __global volatile uint * restrict const pMatchCount, __global match_entry * restrict const pMatches, __global const mode * restrict const pMode, const uchar scoreMax, const uint deviceIndex, const uint round, const uchar thresholdScore);
+void eradicate2_score_leadingany(const uchar * const hash, __global result * restrict const pResult, __global volatile uint * restrict const pHasResult, __global volatile uint * restrict const pMatchCount, __global match_entry * restrict const pMatches, __global const mode * restrict const pMode, const uchar scoreMax, const uint deviceIndex, const uint round, const uchar thresholdScore);
+void eradicate2_score_mirror(const uchar * const hash, __global result * restrict const pResult, __global volatile uint * restrict const pHasResult, __global volatile uint * restrict const pMatchCount, __global match_entry * restrict const pMatches, __global const mode * restrict const pMode, const uchar scoreMax, const uint deviceIndex, const uint round, const uchar thresholdScore);
+void eradicate2_score_doubles(const uchar * const hash, __global result * restrict const pResult, __global volatile uint * restrict const pHasResult, __global volatile uint * restrict const pMatchCount, __global match_entry * restrict const pMatches, __global const mode * restrict const pMode, const uchar scoreMax, const uint deviceIndex, const uint round, const uchar thresholdScore);
 
-	switch (pMode->function) {
-	case Benchmark:
-		eradicate2_score_benchmark(h.b + 12, pResult, pMode, scoreMax, deviceIndex, round);
-		break;
+__kernel void eradicate2_iterate(__global result * restrict const pResult, __global const mode * restrict const pMode, const uchar scoreMax, const uint deviceIndex, const uint round, __global volatile uint * restrict const pHasResult, __global volatile uint * restrict const pMatchCount, __global match_entry * restrict const pMatches, const uint roundsPerKernel, const uchar thresholdScore) {
+	for (uint iter = 0; iter < roundsPerKernel; ++iter) {
+		const uint currentRound = round + iter;
+		ethhash h = { .q = { ERADICATE2_INITHASH } };
 
-	case ZeroBytes:
-		eradicate2_score_zerobytes(h.b + 12, pResult, pMode, scoreMax, deviceIndex, round);
-		break;
+		// Salt have index h.b[21:52] inclusive, which covers WORDS with index h.d[6:12] inclusive (they represent h.b[24:51] inclusive)
+		// We use three out of those six words to generate a unique salt value for each device, thread and round. We ignore any overflows
+		// and assume that there'll never be more than 2**32 devices, threads or rounds. Worst case scenario with default settings
+		// of 16777216 = 2**24 threads means the assumption fails after a device has tried 2**32 * 2**24 = 2**56 salts, enough to match
+		// 14 characters in the address! A GTX 1070 with speed of ~700*10**6 combinations per second would hit this target after ~3 years.
+		h.d[6] += deviceIndex; 
+		h.d[7] += get_global_id(0);
+		h.d[8] += currentRound;
 
-	case Matching:
-		eradicate2_score_matching(h.b + 12, pResult, pMode, scoreMax, deviceIndex, round);
-		break;
+		// Hash
+		sha3_keccakf(&h);
 
-	case Leading:
-		eradicate2_score_leading(h.b + 12, pResult, pMode, scoreMax, deviceIndex, round);
-		break;
+		h.b[0] = 0xd6;
+		h.b[1] = 0x94;
+		#pragma unroll
+		for (int i = 12; i < 42; i++) {
+			h.b[i - 10] = h.b[i];
+		}
+		h.b[22] = 0x01;
+		h.b[23] = 0x01; // padding
+		#pragma unroll
+		for (int i = 24; i < 200; i++) {
+			h.b[i] = 0;
+		}
+		sha3_keccakf(&h);
 
-	case Range:
-		eradicate2_score_range(h.b + 12, pResult, pMode, scoreMax, deviceIndex, round);
-		break;
+		switch (pMode->function) {
+		case Benchmark:
+			eradicate2_score_benchmark(h.b + 12, pResult, pHasResult, pMatchCount, pMatches, pMode, scoreMax, deviceIndex, currentRound, thresholdScore);
+			break;
 
-	case Mirror:
-		eradicate2_score_mirror(h.b + 12, pResult, pMode, scoreMax, deviceIndex, round);
-		break;
+		case ZeroBytes:
+			eradicate2_score_zerobytes(h.b + 12, pResult, pHasResult, pMatchCount, pMatches, pMode, scoreMax, deviceIndex, currentRound, thresholdScore);
+			break;
 
-	case Doubles:
-		eradicate2_score_doubles(h.b + 12, pResult, pMode, scoreMax, deviceIndex, round);
-		break;
+		case Matching:
+			eradicate2_score_matching(h.b + 12, pResult, pHasResult, pMatchCount, pMatches, pMode, scoreMax, deviceIndex, currentRound, thresholdScore);
+			break;
 
-	case LeadingRange:
-		eradicate2_score_leadingrange(h.b + 12, pResult, pMode, scoreMax, deviceIndex, round);
-		break;
+		case Leading:
+			eradicate2_score_leading(h.b + 12, pResult, pHasResult, pMatchCount, pMatches, pMode, scoreMax, deviceIndex, currentRound, thresholdScore);
+			break;
 
-	case LeadingAny:
-		eradicate2_score_leadingany(h.b + 12, pResult, pMode, scoreMax, deviceIndex, round);
-		break;
+		case Range:
+			eradicate2_score_range(h.b + 12, pResult, pHasResult, pMatchCount, pMatches, pMode, scoreMax, deviceIndex, currentRound, thresholdScore);
+			break;
+
+		case Mirror:
+			eradicate2_score_mirror(h.b + 12, pResult, pHasResult, pMatchCount, pMatches, pMode, scoreMax, deviceIndex, currentRound, thresholdScore);
+			break;
+
+		case Doubles:
+			eradicate2_score_doubles(h.b + 12, pResult, pHasResult, pMatchCount, pMatches, pMode, scoreMax, deviceIndex, currentRound, thresholdScore);
+			break;
+
+		case LeadingRange:
+			eradicate2_score_leadingrange(h.b + 12, pResult, pHasResult, pMatchCount, pMatches, pMode, scoreMax, deviceIndex, currentRound, thresholdScore);
+			break;
+
+		case LeadingAny:
+			eradicate2_score_leadingany(h.b + 12, pResult, pHasResult, pMatchCount, pMatches, pMode, scoreMax, deviceIndex, currentRound, thresholdScore);
+			break;
+		}
 	}
 }
 
-void eradicate2_result_update(const uchar * const H, __global result * const pResult, const uchar score, const uchar scoreMax, const uint deviceIndex, const uint round) {
+void eradicate2_result_update(const uchar * const H, __global result * restrict const pResult, __global volatile uint * restrict const pHasResult, __global volatile uint * restrict const pMatchCount, __global match_entry * restrict const pMatches, const uchar score, const uchar scoreMax, const uint deviceIndex, const uint round) {
 	if (score && score >= scoreMax) {
 		const uchar hasResult = atomic_inc(&pResult[score].found); // NOTE: If "too many" results are found it'll wrap around to 0 again and overwrite last result. Only relevant if global worksize exceeds MAX(uint).
 
@@ -123,8 +136,6 @@ void eradicate2_result_update(const uchar * const H, __global result * const pRe
 			h.d[7] += get_global_id(0);
 			h.d[8] += round;
 
-			ethhash be;
-
 			for (int i = 0; i < 32; ++i) {
 				pResult[score].salt[i] = h.b[i + 21];
 			}
@@ -132,17 +143,32 @@ void eradicate2_result_update(const uchar * const H, __global result * const pRe
 			for (int i = 0; i < 20; ++i) {
 				pResult[score].hash[i] = H[i];
 			}
+			const uint matchIndex = atomic_inc(pMatchCount);
+			if (matchIndex < MATCH_QUEUE_SIZE) {
+				pMatches[matchIndex].score = score;
+			}
+			atomic_or(pHasResult, 1u);
 		}
 	}
 }
 
-void eradicate2_score_leading(const uchar * const hash, __global result * const pResult, __global const mode * const pMode, const uchar scoreMax, const uint deviceIndex, const uint round) {
+void eradicate2_score_leading(const uchar * const hash, __global result * restrict const pResult, __global volatile uint * restrict const pHasResult, __global volatile uint * restrict const pMatchCount, __global match_entry * restrict const pMatches, __global const mode * restrict const pMode, const uchar scoreMax, const uint deviceIndex, const uint round, const uchar thresholdScore) {
 	int score = 0;
 
 	for (int i = 0; i < 20; ++i) {
+		int remaining = (20 - i) * 2;
+		if (!thresholdStillReachable(score, remaining, thresholdScore)) {
+			break;
+		}
+
 		if ((hash[i] & 0xF0) >> 4 == pMode->data1[0]) {
 			++score;
 		} else {
+			break;
+		}
+
+		--remaining;
+		if (!thresholdStillReachable(score, remaining, thresholdScore)) {
 			break;
 		}
 
@@ -153,76 +179,92 @@ void eradicate2_score_leading(const uchar * const hash, __global result * const 
 		}
 	}
 
-	eradicate2_result_update(hash, pResult, score, scoreMax, deviceIndex, round);
+	eradicate2_result_update(hash, pResult, pHasResult, pMatchCount, pMatches, score, scoreMax, deviceIndex, round);
 }
 
-void eradicate2_score_benchmark(const uchar * const hash, __global result * const pResult, __global const mode * const pMode, const uchar scoreMax, const uint deviceIndex, const uint round) {
-	const size_t id = get_global_id(0);
+void eradicate2_score_benchmark(const uchar * const hash, __global result * restrict const pResult, __global volatile uint * restrict const pHasResult, __global volatile uint * restrict const pMatchCount, __global match_entry * restrict const pMatches, __global const mode * restrict const pMode, const uchar scoreMax, const uint deviceIndex, const uint round, const uchar thresholdScore) {
 	int score = 0;
+	(void) thresholdScore;
 
-	eradicate2_result_update(hash, pResult, score, scoreMax, deviceIndex, round);
+	eradicate2_result_update(hash, pResult, pHasResult, pMatchCount, pMatches, score, scoreMax, deviceIndex, round);
 }
 
-void eradicate2_score_zerobytes(const uchar * const hash, __global result * const pResult, __global const mode * const pMode, const uchar scoreMax, const uint deviceIndex, const uint round) {
-	const size_t id = get_global_id(0);
+void eradicate2_score_zerobytes(const uchar * const hash, __global result * restrict const pResult, __global volatile uint * restrict const pHasResult, __global volatile uint * restrict const pMatchCount, __global match_entry * restrict const pMatches, __global const mode * restrict const pMode, const uchar scoreMax, const uint deviceIndex, const uint round, const uchar thresholdScore) {
 	int score = 0;
+	(void) thresholdScore;
 
+	#pragma unroll
 	for (int i = 0; i < 20; ++i) {
 		score += !hash[i];
 	}
 
-	eradicate2_result_update(hash, pResult, score, scoreMax, deviceIndex, round);
+	eradicate2_result_update(hash, pResult, pHasResult, pMatchCount, pMatches, score, scoreMax, deviceIndex, round);
 }
 
-void eradicate2_score_matching(const uchar * const hash, __global result * const pResult, __global const mode * const pMode, const uchar scoreMax, const uint deviceIndex, const uint round) {
-	const size_t id = get_global_id(0);
+void eradicate2_score_matching(const uchar * const hash, __global result * restrict const pResult, __global volatile uint * restrict const pHasResult, __global volatile uint * restrict const pMatchCount, __global match_entry * restrict const pMatches, __global const mode * restrict const pMode, const uchar scoreMax, const uint deviceIndex, const uint round, const uchar thresholdScore) {
 	int score = 0;
+	(void) thresholdScore;
 
+	#pragma unroll
 	for (int i = 0; i < 20; ++i) {
-		if (pMode->data1[i] > 0 && (hash[i] & pMode->data1[i]) == pMode->data2[i]) {
-			++score;
-		}
+		const uchar mask = pMode->data1[i];
+		const uchar val  = pMode->data2[i];
+		score += (mask && ((hash[i] & mask) == val));
 	}
 
-	eradicate2_result_update(hash, pResult, score, scoreMax, deviceIndex, round);
+	eradicate2_result_update(hash, pResult, pHasResult, pMatchCount, pMatches, score, scoreMax, deviceIndex, round);
 }
 
-void eradicate2_score_range(const uchar * const hash, __global result * const pResult, __global const mode * const pMode, const uchar scoreMax, const uint deviceIndex, const uint round) {
-	const size_t id = get_global_id(0);
+void eradicate2_score_range(const uchar * const hash, __global result * restrict const pResult, __global volatile uint * restrict const pHasResult, __global volatile uint * restrict const pMatchCount, __global match_entry * restrict const pMatches, __global const mode * restrict const pMode, const uchar scoreMax, const uint deviceIndex, const uint round, const uchar thresholdScore) {
 	int score = 0;
 
 	for (int i = 0; i < 20; ++i) {
+		int remaining = (20 - i) * 2;
+		if (!thresholdStillReachable(score, remaining, thresholdScore)) {
+			break;
+		}
+
 		const uchar first = (hash[i] & 0xF0) >> 4;
 		const uchar second = (hash[i] & 0x0F);
 
-		if (first >= pMode->data1[0] && first <= pMode->data2[0]) {
-			++score;
+		score += pMode->data2[first + 1];
+
+		--remaining;
+		if (!thresholdStillReachable(score, remaining, thresholdScore)) {
+			break;
 		}
 
-		if (second >= pMode->data1[0] && second <= pMode->data2[0]) {
-			++score;
-		}
+		score += pMode->data2[second + 1];
 	}
 
-	eradicate2_result_update(hash, pResult, score, scoreMax, deviceIndex, round);
+	eradicate2_result_update(hash, pResult, pHasResult, pMatchCount, pMatches, score, scoreMax, deviceIndex, round);
 }
 
-void eradicate2_score_leadingrange(const uchar * const hash, __global result * const pResult, __global const mode * const pMode, const uchar scoreMax, const uint deviceIndex, const uint round) {
-	const size_t id = get_global_id(0);
+void eradicate2_score_leadingrange(const uchar * const hash, __global result * restrict const pResult, __global volatile uint * restrict const pHasResult, __global volatile uint * restrict const pMatchCount, __global match_entry * restrict const pMatches, __global const mode * restrict const pMode, const uchar scoreMax, const uint deviceIndex, const uint round, const uchar thresholdScore) {
 	int score = 0;
 
 	for (int i = 0; i < 20; ++i) {
+		int remaining = (20 - i) * 2;
+		if (!thresholdStillReachable(score, remaining, thresholdScore)) {
+			break;
+		}
+
 		const uchar first = (hash[i] & 0xF0) >> 4;
 		const uchar second = (hash[i] & 0x0F);
 
-		if (first >= pMode->data1[0] && first <= pMode->data2[0]) {
+		if (pMode->data2[first + 1]) {
 			++score;
 		}
 		else {
 			break;
 		}
 
-		if (second >= pMode->data1[0] && second <= pMode->data2[0]) {
+		--remaining;
+		if (!thresholdStillReachable(score, remaining, thresholdScore)) {
+			break;
+		}
+
+		if (pMode->data2[second + 1]) {
 			++score;
 		}
 		else {
@@ -230,14 +272,19 @@ void eradicate2_score_leadingrange(const uchar * const hash, __global result * c
 		}
 	}
 
-	eradicate2_result_update(hash, pResult, score, scoreMax, deviceIndex, round);
+	eradicate2_result_update(hash, pResult, pHasResult, pMatchCount, pMatches, score, scoreMax, deviceIndex, round);
 }
 
-void eradicate2_score_leadingany(const uchar * const hash, __global result * const pResult, __global const mode * const pMode, const uchar scoreMax, const uint deviceIndex, const uint round){
+void eradicate2_score_leadingany(const uchar * const hash, __global result * restrict const pResult, __global volatile uint * restrict const pHasResult, __global volatile uint * restrict const pMatchCount, __global match_entry * restrict const pMatches, __global const mode * restrict const pMode, const uchar scoreMax, const uint deviceIndex, const uint round, const uchar thresholdScore){
 	int score = 0;
 	uchar firstSymbol = (hash[0] & 0xF0) >> 4;
 
 	for (int i = 0; i < 20; ++i) {
+		int remaining = (20 - i) * 2;
+		if (!thresholdStillReachable(score, remaining, thresholdScore)) {
+			break;
+		}
+
 		uchar highNibble = (hash[i] & 0xF0) >> 4;
 		uchar lowNibble = hash[i] & 0x0F;
 		if (highNibble == firstSymbol) {
@@ -252,14 +299,18 @@ void eradicate2_score_leadingany(const uchar * const hash, __global result * con
 		}
 	}
 
-	eradicate2_result_update(hash, pResult, score, scoreMax, deviceIndex, round);
+	eradicate2_result_update(hash, pResult, pHasResult, pMatchCount, pMatches, score, scoreMax, deviceIndex, round);
 }
 
-void eradicate2_score_mirror(const uchar * const hash, __global result * const pResult, __global const mode * const pMode, const uchar scoreMax, const uint deviceIndex, const uint round) {
-	const size_t id = get_global_id(0);
+void eradicate2_score_mirror(const uchar * const hash, __global result * restrict const pResult, __global volatile uint * restrict const pHasResult, __global volatile uint * restrict const pMatchCount, __global match_entry * restrict const pMatches, __global const mode * restrict const pMode, const uchar scoreMax, const uint deviceIndex, const uint round, const uchar thresholdScore) {
 	int score = 0;
 
 	for (int i = 0; i < 10; ++i) {
+		int remaining = (10 - i) * 2;
+		if (!thresholdStillReachable(score, remaining, thresholdScore)) {
+			break;
+		}
+
 		const uchar leftLeft = (hash[9 - i] & 0xF0) >> 4;
 		const uchar leftRight = (hash[9 - i] & 0x0F);
 
@@ -279,15 +330,21 @@ void eradicate2_score_mirror(const uchar * const hash, __global result * const p
 		++score;
 	}
 
-	eradicate2_result_update(hash, pResult, score, scoreMax, deviceIndex, round);
+	eradicate2_result_update(hash, pResult, pHasResult, pMatchCount, pMatches, score, scoreMax, deviceIndex, round);
 }
 
-void eradicate2_score_doubles(const uchar * const hash, __global result * const pResult, __global const mode * const pMode, const uchar scoreMax, const uint deviceIndex, const uint round) {
-	const size_t id = get_global_id(0);
+void eradicate2_score_doubles(const uchar * const hash, __global result * restrict const pResult, __global volatile uint * restrict const pHasResult, __global volatile uint * restrict const pMatchCount, __global match_entry * restrict const pMatches, __global const mode * restrict const pMode, const uchar scoreMax, const uint deviceIndex, const uint round, const uchar thresholdScore) {
 	int score = 0;
 
 	for (int i = 0; i < 20; ++i) {
-		if ((hash[i] == 0x00) || (hash[i] == 0x11) || (hash[i] == 0x22) || (hash[i] == 0x33) || (hash[i] == 0x44) || (hash[i] == 0x55) || (hash[i] == 0x66) || (hash[i] == 0x77) || (hash[i] == 0x88) || (hash[i] == 0x99) || (hash[i] == 0xAA) || (hash[i] == 0xBB) || (hash[i] == 0xCC) || (hash[i] == 0xDD) || (hash[i] == 0xEE) || (hash[i] == 0xFF)) {
+		int remaining = (20 - i) * 2;
+		if (!thresholdStillReachable(score, remaining, thresholdScore)) {
+			break;
+		}
+
+		const uchar hi = (hash[i] & 0xF0) >> 4;
+		const uchar lo = hash[i] & 0x0F;
+		if (hi == lo) {
 			++score;
 		}
 		else {
@@ -295,5 +352,5 @@ void eradicate2_score_doubles(const uchar * const hash, __global result * const 
 		}
 	}
 
-	eradicate2_result_update(hash, pResult, score, scoreMax, deviceIndex, round);
+	eradicate2_result_update(hash, pResult, pHasResult, pMatchCount, pMatches, score, scoreMax, deviceIndex, round);
 }
