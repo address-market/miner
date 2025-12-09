@@ -1,4 +1,5 @@
 #include "Dispatcher.hpp"
+#include "sha3.hpp"
 
 // Includes
 #include <stdexcept>
@@ -11,6 +12,23 @@
 #include <algorithm>
 #include "hexadecimal.hpp"
 
+static std::string toChecksumAddress(const std::string & addressHexLower) {
+	char digest[32];
+	sha3(addressHexLower.c_str(), addressHexLower.size(), digest, 32);
+	
+	std::string checksumAddress = addressHexLower;
+	
+	for (int i = 0; i < 40; ++i) {
+		const unsigned char hashByte = digest[i / 2];
+		const int nibble = (i % 2 == 0) ? (hashByte >> 4) : (hashByte & 0x0f);
+		
+		if (nibble >= 8) {
+			checksumAddress[i] = std::toupper(checksumAddress[i]);
+		}
+	}
+	return checksumAddress;
+}
+
 static void printResult(const result r, const cl_uchar score, const std::chrono::time_point<std::chrono::steady_clock> & timeStart) {
 	// Time delta
 	const auto seconds = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - timeStart).count();
@@ -18,10 +36,11 @@ static void printResult(const result r, const cl_uchar score, const std::chrono:
 	// Format address
 	const std::string strSalt = toHex(r.salt, 32);
 	const std::string strPublic = toHex(r.hash, 20);
+	const std::string strChecksum = toChecksumAddress(strPublic);
 
 	// Print
 	const std::string strVT100ClearLine = "\33[2K\r";
-	std::cout << strVT100ClearLine << "  Time: " << std::setw(5) << seconds << "s Score: " << std::setw(2) << (int) score << " Salt: 0x" << strSalt << " Address: 0x" << strPublic << std::endl;
+	std::cout << strVT100ClearLine << "  Time: " << std::setw(5) << seconds << "s Score: " << std::setw(2) << (int) score << " Salt: 0x" << strSalt << " Address: 0x" << strChecksum << std::endl;
 }
 
 Dispatcher::OpenCLException::OpenCLException(const std::string s, const cl_int res) :
