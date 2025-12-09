@@ -7,10 +7,10 @@ EXECUTABLE=address-miner.x64
 UNAME_S := $(shell uname -s)
 ifeq ($(UNAME_S),Darwin)
 	LDFLAGS=-framework OpenCL
-	CFLAGS=-c -std=c++11 -Wall -O2 -g
+	CFLAGS=-c -std=c++11 -Wall -O3 -g
 else
 	LDFLAGS=-s -lOpenCL -mcmodel=large
-	CFLAGS=-c -std=c++11 -Wall -mmmx -O2 -mcmodel=large -g
+	CFLAGS=-c -std=c++11 -Wall -mmmx -O3 -mcmodel=large -g
 endif
 
 all: $(SOURCES) $(EXECUTABLE)

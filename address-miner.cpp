@@ -190,7 +190,7 @@ int main(int argc, char * * argv) {
 		std::string strModeMatching;
 		size_t leadingThreshold = 0;
 		bool bModeLeadingRange = false;
-		size_t roundsPerKernel = 1;
+		size_t roundsPerKernel = 0; // 0 = Auto-tuning enabled by default
 		bool bModeRange = false;
 		bool bModeMirror = false;
 		bool bModeDoubles = false;
@@ -198,7 +198,7 @@ int main(int argc, char * * argv) {
 		int rangeMin = 0;
 		int rangeMax = 0;
 		std::vector<size_t> vDeviceSkipIndex;
-		size_t worksizeLocal = 128;
+		size_t worksizeLocal = 256;
 		size_t worksizeMax = 0; // Will be automatically determined later if not overriden by user
 		size_t size = 16777216;
 		std::string strAddress = "0xB9af59262147673C2016b2b10808411166756ed3";
@@ -343,7 +343,7 @@ int main(int argc, char * * argv) {
 		// Build the program
 		std::cout << "  Building program..." << std::flush;
 
-		const std::string strBuildOptions = "-D ERADICATE2_MAX_SCORE=" + lexical_cast::write(ERADICATE2_MAX_SCORE) + " -D ERADICATE2_INITHASH=" + strPreprocessorInitStructure;
+		const std::string strBuildOptions = "-cl-fast-relaxed-math -cl-mad-enable -cl-no-signed-zeros -D ERADICATE2_MAX_SCORE=" + lexical_cast::write(ERADICATE2_MAX_SCORE) + " -D ERADICATE2_INITHASH=" + strPreprocessorInitStructure;
 		auto buildWithRetry = [&](const std::string & options) {
 			constexpr int maxAttempts = 3;
 			const auto delay = std::chrono::milliseconds(50);

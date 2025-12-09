@@ -16,6 +16,7 @@ Speed(const unsigned int intervalPrintMs = 3000, const unsigned int intervalSamp
 	~Speed();
 
 	void update(const unsigned int numPoints, const unsigned int indexDevice);
+	void addResult();
 	void print() const;
 
 	double getSpeed() const;
@@ -33,6 +34,10 @@ private:
 	mutable std::recursive_mutex m_mutex;
 	sampleList m_lSamples;
 	std::map<unsigned int, sampleList> m_mDeviceSamples;
+	std::map<unsigned int, unsigned long long> m_mDeviceTotalHashes;
+	
+	size_t m_totalResults;
+	std::chrono::time_point<std::chrono::steady_clock> m_startTime;
 };
 
 #endif /* _HPP_SPEED */

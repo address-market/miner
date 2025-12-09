@@ -49,6 +49,10 @@ cl_command_queue Dispatcher::Device::createQueue(cl_context & clContext, cl_devi
 	}
 #endif
 
+	if (p & CL_QUEUE_PROFILING_ENABLE) {
+		// std::cout << "  DEBUG: Queue profiling enabled for device." << std::endl;
+	}
+
 #ifdef CL_VERSION_2_0
 	const cl_command_queue ret = clCreateCommandQueueWithProperties(clContext, clDeviceId, &p, NULL);
 #else
@@ -75,16 +79,31 @@ Dispatcher::Device::Device(Dispatcher & parent, cl_context & clContext, cl_progr
 	m_memHasResult(clContext, m_clQueue, CL_MEM_READ_WRITE, 1),
 	m_memMatchCount(clContext, m_clQueue, CL_MEM_READ_WRITE, 1),
 	m_memMatches(clContext, m_clQueue, CL_MEM_READ_WRITE, MATCH_QUEUE_SIZE),
+	m_memProgress(clContext, m_clQueue, CL_MEM_READ_WRITE, 1),
+	m_isAutoTuning(parent.m_roundsPerKernel == 0),
+	m_bestRounds(1),
+	m_bestSpeed(0.0),
+	m_tuningStartTime(std::chrono::steady_clock::now()),
+	m_tuningAccumulatedHashes(0.0),
 	m_round(0),
 	m_roundsPerKernel(parent.m_roundsPerKernel),
 	m_dispatchCount(0),
-	m_pollInterval(8),
+	m_pollInterval(1),
 	m_totalKernelNs(0),
 	m_totalReadNs(0),
 	m_kernelProfileCount(0),
-	m_readProfileCount(0)
+	m_readProfileCount(0),
+	m_lastProgress(0),
+	m_firstProgressUpdate(true)
 {
+	m_roundsPerKernel = m_isAutoTuning ? 1 : parent.m_roundsPerKernel;
+	// Adapt poll interval: maintain frequent updates (~every few seconds)
+	// Base: 32 dispatches for 1 round. For 32 rounds, we want 1 dispatch.
+	m_pollInterval = std::max((size_t)1, (size_t)(32 / m_roundsPerKernel));
 
+	if (m_isAutoTuning) {
+		std::cout << "\n  GPU" << m_index << ": Auto-tuning enabled. Starting with 1 round..." << std::endl;
+	}
 }
 
 Dispatcher::Device::~Device() {
@@ -97,7 +116,8 @@ Dispatcher::Dispatcher(cl_context & clContext, cl_program & clProgram, const siz
 	  m_worksizeMax(worksizeMax),
 	  m_size(size),
 	  m_clScoreMax(0),
-	  m_roundsPerKernel(static_cast<cl_uint>(std::max<size_t>(1, roundsPerKernel))),
+	  // If roundsPerKernel is 0, we enable auto-tuning.
+	  m_roundsPerKernel(roundsPerKernel),
 	  m_vDevices(),
 	  m_eventFinished(NULL),
 	  m_speed(),
@@ -106,7 +126,8 @@ Dispatcher::Dispatcher(cl_context & clContext, cl_program & clProgram, const siz
 	  m_quit(false),
 	  m_collectAllLeading(false),
 	  m_thresholdScore(0),
-	  m_profile(profile),
+	  // Force profiling if auto-tuning is requested (roundsPerKernel == 0)
+	  m_profile(profile || roundsPerKernel == 0),
 	  m_profileReported(false) {
 
 }
@@ -149,6 +170,11 @@ void Dispatcher::run(const mode & mode) {
 		d.m_memHasResult.write(true);
 		d.m_memMatchCount[0] = 0;
 		d.m_memMatchCount.write(true);
+		
+		d.m_memProgress[0] = 0;
+		d.m_memProgress.write(true);
+		d.m_lastProgress = 0;
+		d.m_firstProgressUpdate = true;
 
 		// Kernel arguments - eradicate2_iterate
 		d.m_memResult.setKernelArg(d.m_kernelIterate, 0);
@@ -160,6 +186,7 @@ void Dispatcher::run(const mode & mode) {
 		d.m_memMatches.setKernelArg(d.m_kernelIterate, 7);
 		CLMemory<cl_uint>::setKernelArg(d.m_kernelIterate, 8, d.m_roundsPerKernel);
 		CLMemory<cl_uchar>::setKernelArg(d.m_kernelIterate, 9, m_thresholdScore);
+		d.m_memProgress.setKernelArg(d.m_kernelIterate, 10);
 		// Round information updated in deviceDispatch()
 	}
 	
@@ -171,6 +198,7 @@ void Dispatcher::run(const mode & mode) {
 
 	// Start asynchronous dispatch loop on all devices
 	for (auto it = m_vDevices.begin(); it != m_vDevices.end(); ++it) {
+		(*it)->m_tuningStartTime = std::chrono::steady_clock::now();
 		deviceDispatch(*(*it));
 	}
 
@@ -234,7 +262,8 @@ void Dispatcher::deviceDispatch(Device & d) {
 	if (hasResult) {
 		d.m_memMatchCount.read(true);
 		cl_uint matchCount = d.m_memMatchCount[0];
-		if (matchCount > MATCH_QUEUE_SIZE) {
+		if (matchCount >= MATCH_QUEUE_SIZE) {
+			std::cout << "\nWARNING: Match queue overflow! Lost " << (matchCount - MATCH_QUEUE_SIZE) << " results. Increase MATCH_QUEUE_SIZE." << std::endl;
 			matchCount = MATCH_QUEUE_SIZE;
 		}
 
@@ -246,12 +275,14 @@ void Dispatcher::deviceDispatch(Device & d) {
 					const cl_uchar score = d.m_memMatches[i].score;
 					if (score >= m_thresholdScore) {
 						result r;
-						d.m_memResult.readRange(true, score, 1, &r);
-						r.found = 0;
-						d.m_memResult.writeRange(false, score, 1, &r);
+						// Use data directly from the match queue
+						std::copy(d.m_memMatches[i].salt, d.m_memMatches[i].salt + 32, r.salt);
+						std::copy(d.m_memMatches[i].hash, d.m_memMatches[i].hash + 20, r.hash);
+						r.found = 1;
 
 						std::lock_guard<std::mutex> lock(m_mutex);
 						printResult(r, score, timeStart);
+						d.m_parent.m_speed.addResult();
 					}
 				}
 			} else {
@@ -277,6 +308,7 @@ void Dispatcher::deviceDispatch(Device & d) {
 							// TODO: Add quit condition
 
 							printResult(r, bestScore, timeStart);
+							d.m_parent.m_speed.addResult();
 					}
 				}
 			}
@@ -288,7 +320,8 @@ void Dispatcher::deviceDispatch(Device & d) {
 		d.m_memMatchCount.write(true);
 	}
 
-	d.m_parent.m_speed.update(d.m_parent.m_size, d.m_index);
+	// Removed optimistic speed update from here. 
+	// Speed is now updated in staticCallback based on real GPU progress.
 
 	if (m_quit) {
 		std::lock_guard<std::mutex> lock(m_mutex);
@@ -311,7 +344,13 @@ void Dispatcher::deviceDispatch(Device & d) {
 		}
 		
 		const cl_uint roundBase = d.m_round;
-		CLMemory<cl_uint>::setKernelArg(d.m_kernelIterate, 4, roundBase); // Round information updated in deviceDispatch()
+		CLMemory<cl_uint>::setKernelArg(d.m_kernelIterate, 4, roundBase);
+		
+		// Update roundsPerKernel in case auto-tuning changed it
+		if (d.m_isAutoTuning) {
+			CLMemory<cl_uint>::setKernelArg(d.m_kernelIterate, 8, d.m_roundsPerKernel);
+		}
+
 		d.m_round += d.m_roundsPerKernel;
 		enqueueKernelDevice(d, d.m_kernelIterate, m_size);
 		clFlush(d.m_clQueue);
@@ -327,6 +366,50 @@ void CL_CALLBACK Dispatcher::staticCallback(cl_event event, cl_int event_command
 	}
 
 	Device * const pDevice = static_cast<Device *>(user_data);
+
+	// Auto-tuning logic (Time-Based: evaluate every 10 seconds)
+	if (pDevice->m_isAutoTuning) {
+		// Callback is called for every batch (via Marker or Read), so we add 1 batch worth of hashes.
+		// Do NOT multiply by pollInterval here.
+		pDevice->m_tuningAccumulatedHashes += (double)pDevice->m_parent.m_size * pDevice->m_roundsPerKernel;
+
+		auto now = std::chrono::steady_clock::now();
+		std::chrono::duration<double> elapsed = now - pDevice->m_tuningStartTime;
+
+		// 10 seconds interval ensures stability and filters out bursts
+		if (elapsed.count() > 10.0) {
+			double avgSpeed = pDevice->m_tuningAccumulatedHashes / elapsed.count();
+
+			// 1.01 = 1% improvement threshold
+			if (avgSpeed > pDevice->m_bestSpeed * 1.01) {
+				pDevice->m_bestSpeed = avgSpeed;
+				pDevice->m_bestRounds = pDevice->m_roundsPerKernel;
+
+				// Try doubling
+				pDevice->m_roundsPerKernel *= 2;
+				pDevice->m_pollInterval = std::max((size_t)1, (size_t)(32 / pDevice->m_roundsPerKernel));
+
+				// Hard limits: 64 rounds
+				if (pDevice->m_roundsPerKernel > 64) {
+					pDevice->m_roundsPerKernel = pDevice->m_bestRounds;
+					pDevice->m_isAutoTuning = false;
+					std::cout << "\33[2K\r Auto-tune: Settled on " << pDevice->m_bestRounds << " rounds (Limit reached)" << std::endl;
+				} else {
+					std::cout << "\33[2K\r Auto-tune: Upgrading to " << pDevice->m_roundsPerKernel << " rounds (" << std::fixed << std::setprecision(2) << avgSpeed / 1000000.0 << " MH/s)" << std::endl;
+				}
+			} else {
+				// No improvement, revert
+				pDevice->m_roundsPerKernel = pDevice->m_bestRounds;
+				pDevice->m_pollInterval = std::max((size_t)1, (size_t)(32 / pDevice->m_roundsPerKernel));
+				pDevice->m_isAutoTuning = false;
+				std::cout << "\33[2K\r Auto-tune: Settled on " << pDevice->m_bestRounds << " rounds (Peak performance)" << std::endl;
+			}
+
+			pDevice->m_tuningStartTime = now;
+			pDevice->m_tuningAccumulatedHashes = 0;
+		}
+	}
+
 	if (pDevice->m_parent.m_profile) {
 		cl_ulong start = 0;
 		cl_ulong end = 0;
@@ -335,6 +418,40 @@ void CL_CALLBACK Dispatcher::staticCallback(cl_event event, cl_int event_command
 		clGetEventProfilingInfo(event, CL_PROFILING_COMMAND_END, sizeof(cl_ulong), &end, NULL);
 		pDevice->m_totalReadNs += (end - start);
 		++pDevice->m_readProfileCount;
+	}
+
+	// Update speed based on real progress
+	cl_ulong currentProgress = 0;
+	// We use a blocking read here to get the actual value written by the kernel
+	pDevice->m_memProgress.read(true);
+	currentProgress = pDevice->m_memProgress[0];
+
+	cl_ulong deltaRounds = 0;
+	
+	if (pDevice->m_firstProgressUpdate) {
+		// First update: since we start from round 0, and currentProgress is 0-based index.
+		// If kernel wrote 63, we did 64 rounds (0..63).
+		// But wait, if round=0, and roundsPerKernel=64.
+		// Threads 0..63. Thread 0 writes 0, then 1... then 63.
+		// So *pProgress ends up being 63.
+		// So delta = 63 + 1 = 64.
+		deltaRounds = currentProgress + 1;
+		pDevice->m_firstProgressUpdate = false;
+	} else {
+		if (currentProgress >= pDevice->m_lastProgress) {
+			deltaRounds = currentProgress - pDevice->m_lastProgress;
+		} else {
+			// Wrap around or reset logic if necessary. 
+			// Assuming monotonic increase for now unless reset.
+			// If reset happened, currentProgress is the new count.
+			deltaRounds = currentProgress; 
+		}
+	}
+	
+	pDevice->m_lastProgress = currentProgress;
+
+	if (deltaRounds > 0) {
+		pDevice->m_parent.m_speed.update(pDevice->m_parent.m_size * deltaRounds, pDevice->m_index);
 	}
 
 	pDevice->m_parent.deviceDispatch(*pDevice);
@@ -355,6 +472,7 @@ void CL_CALLBACK Dispatcher::kernelProfilingCallback(cl_event event, cl_int even
 	clGetEventProfilingInfo(event, CL_PROFILING_COMMAND_END, sizeof(cl_ulong), &end, NULL);
 	pDevice->m_totalKernelNs += (end - start);
 	++pDevice->m_kernelProfileCount;
+
 	if (pDevice->m_parent.m_profile && !pDevice->m_parent.m_profileReported) {
 		bool ready = true;
 		for (auto dev : pDevice->m_parent.m_vDevices) {

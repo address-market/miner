@@ -24,9 +24,12 @@
 struct MatchEntry {
 	cl_uchar score;
 	cl_uchar padding[3];
+	cl_uchar salt[32];
+	cl_uchar hash[20];
+	cl_uchar padding2[8];
 };
 
-static const size_t MATCH_QUEUE_SIZE = 64;
+static const size_t MATCH_QUEUE_SIZE = 65536;
 
 class Dispatcher {
 	private:
@@ -61,15 +64,27 @@ class Dispatcher {
 			CLMemory<cl_uint> m_memHasResult;
 			CLMemory<cl_uint> m_memMatchCount;
 			CLMemory<MatchEntry> m_memMatches;
+			CLMemory<cl_ulong> m_memProgress;
+			
+			// Tuning State
+			bool m_isAutoTuning;
+			cl_uint m_bestRounds;
+			double m_bestSpeed;
+			std::chrono::time_point<std::chrono::steady_clock> m_tuningStartTime;
+			double m_tuningAccumulatedHashes;
 
 			cl_uint m_round;
-			const cl_uint m_roundsPerKernel;
+			cl_uint m_roundsPerKernel;
 			size_t m_dispatchCount;
-			const size_t m_pollInterval;
+			size_t m_pollInterval;
 			cl_ulong m_totalKernelNs;
 			cl_ulong m_totalReadNs;
 			size_t m_kernelProfileCount;
 			size_t m_readProfileCount;
+
+			// Progress tracking
+			cl_ulong m_lastProgress;
+			bool m_firstProgressUpdate;
 		};
 
 	public:

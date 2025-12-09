@@ -97,14 +97,25 @@ __constant ulong keccakf_rndc[24] = {
 	0x8000000000008080, 0x0000000080000001, 0x8000000080008008
 };
 
+// Conditional unrolling strategy
+#if defined(__APPLE__)
+	// On Apple Silicon, full unrolling combined with high roundsPerKernel causes
+	// instruction cache thrashing and spills. Prefer a hinted loop.
+	#define KECCAK_UNROLL __attribute__((opencl_unroll_hint(1)))
+#else
+	// On NVIDIA/AMD, full unrolling is generally preferred for ILP.
+	#define KECCAK_UNROLL #pragma unroll
+#endif
+
 // Barely a bottleneck. No need to tinker more.
-void sha3_keccakf(ethhash * const h)
+static inline void __attribute__((always_inline)) sha3_keccakf(ethhash * const h)
 {
 	ulong * const st = h->q;
 	h->d[33] ^= 0x80000000;
 	ulong t0, t1, t2, t3, t4, t5;
 
 	// Unrolling and removing PI stage gave negligable performance on GTX 1070.
+	KECCAK_UNROLL
 	for (int i = 0; i < 24; ++i) {
 		THETA(st[0], st[5], st[10], st[15], st[20], st[1], st[6], st[11], st[16], st[21], st[2], st[7], st[12], st[17], st[22], st[3], st[8], st[13], st[18], st[23], st[4], st[9], st[14], st[19], st[24]);
 		RHOPI(st[0], st[5], st[10], st[15], st[20], st[1], st[6], st[11], st[16], st[21], st[2], st[7], st[12], st[17], st[22], st[3], st[8], st[13], st[18], st[23], st[4], st[9], st[14], st[19], st[24]);
