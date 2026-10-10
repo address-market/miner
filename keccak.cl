@@ -5,7 +5,27 @@
  * https://github.com/llamasoft/xptMiner-gpu/blob/master/opencl/keccak.cl
  */
 
+#if defined(cl_amd_media_ops)
+#pragma OPENCL EXTENSION cl_amd_media_ops : enable
+// 64-bit shifts are multi-cycle on GCN/RDNA, two 32-bit bitaligns are not.
+// n must not be 0 or 32, which holds for every Keccak rotation offset.
+static inline ulong __attribute__((always_inline)) rotl64(const ulong x, const uint n)
+{
+	const uint2 v = as_uint2(x);
+	uint2 r;
+	if (n < 32) {
+		r.y = amd_bitalign(v.y, v.x, 32 - n);
+		r.x = amd_bitalign(v.x, v.y, 32 - n);
+	} else {
+		r.y = amd_bitalign(v.x, v.y, 64 - n);
+		r.x = amd_bitalign(v.y, v.x, 64 - n);
+	}
+	return as_ulong(r);
+}
+#define ROTL64(x, n) rotl64((x), (n))
+#else
 #define ROTL64(x, n) rotate((x), (ulong)(n))
+#endif
 
 #define TH_ELT_SHORT(t, d, c) t = ROTL64(d, 1) ^ c
 
