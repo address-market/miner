@@ -24,7 +24,7 @@ Basic modes:
 Modes with arguments:
 ```
 --leading <single hex>  Score on hashes leading with given hex character.
---leading-threshold <number>  Minimum leading score to display results (use with --leading).
+-T, --leading-threshold <number>  With --leading, print every address scoring at least <number> instead of only new best ones.
 --matching <hex string> Score on hashes matching given hex string.
 ```
 
@@ -45,16 +45,15 @@ Range:
 Device control:
 ```
 -s, --skip <index>      Skip device given by index.
--n, --no-cache          Don't load cached pre-compiled version of kernel.
 ```
 
 Tweaking:
 ```
--w, --work <size>       Set OpenCL local work size. [default = 64]
--W, --work-max <size>   Set OpenCL maximum work size. [default = -i * -I]
+-w, --work <size>       Set OpenCL local work size. [default = 256]
+-W, --work-max <size>   Set OpenCL maximum work size. [default = -S]
 -S, --size <size>       Set number of salts tried per loop.
 		    [default = 16777216]
---rounds <count>        Set number of rounds per kernel dispatch. [default = 1]
+-r, --rounds <count>    Set number of rounds per kernel dispatch. [default = auto-tune]
 ```
 
 Examples:
@@ -65,6 +64,6 @@ Examples:
 
 Profiling:
 ```
---profile               Enable kernel/read profiling output (shows average time once the first sample is collected).
+-p, --profile           Enable kernel/read profiling output (shows average time once the first sample is collected).
 ```
 

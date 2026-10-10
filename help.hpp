@@ -18,6 +18,9 @@ usage: ./address-miner [OPTIONS]
   Modes with arguments:
     --leading <single hex>  Score on hashes leading with given hex character.
     --matching <hex string> Score on hashes matching given hex string.
+    -T, --leading-threshold <number>
+                            With --leading, print every address scoring at
+                            least <number> instead of only new best ones.
 
   Advanced modes:
     --leading-range         Scores on hashes leading with characters within
@@ -31,13 +34,17 @@ usage: ./address-miner [OPTIONS]
 
   Device control:
     -s, --skip <index>      Skip device given by index.
-    -n, --no-cache          Don't load cached pre-compiled version of kernel.
 
   Tweaking:
-    -w, --work <size>       Set OpenCL local work size. [default = 64]
-    -W, --work-max <size>   Set OpenCL maximum work size. [default = -i * -I]
+    -w, --work <size>       Set OpenCL local work size. [default = 256]
+    -W, --work-max <size>   Set OpenCL maximum work size. [default = -S]
     -S, --size <size>       Set number of salts tried per loop.
                             [default = 16777216]
+    -r, --rounds <count>    Set number of rounds per kernel dispatch.
+                            [default = auto-tune]
+
+  Profiling:
+    -p, --profile           Print average kernel and read times.
 
   Examples:
     ./address-miner --leading 0
