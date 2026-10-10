@@ -8,14 +8,14 @@
 
 class Speed {
 public:
-	typedef std::pair<long long, size_t> samplePair;
+	typedef std::pair<long long, unsigned long long> samplePair;
 	typedef std::list<samplePair> sampleList;
 
 public:
 Speed(const unsigned int intervalPrintMs = 3000, const unsigned int intervalSampleMs = 10000);
 	~Speed();
 
-	void update(const unsigned int numPoints, const unsigned int indexDevice);
+	void update(const unsigned long long numPoints, const unsigned int indexDevice);
 	void addResult();
 	void print() const;
 
@@ -24,7 +24,7 @@ Speed(const unsigned int intervalPrintMs = 3000, const unsigned int intervalSamp
 
 private:
 	double getSpeed(const sampleList & l) const;
-	void updateList(const unsigned int & numPoints, const long long & ns, sampleList & l);
+	void updateList(const unsigned long long & numPoints, const long long & ns, sampleList & l);
 
 private:
 	const unsigned int m_intervalPrintMs;
@@ -40,4 +40,4 @@ private:
 	std::chrono::time_point<std::chrono::steady_clock> m_startTime;
 };
 
-#endif /* _HPP_SPEED */
+#endif /* _HPP_SPEED */

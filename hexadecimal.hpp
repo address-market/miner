@@ -1,6 +1,8 @@
 #ifndef HPP_HEXADECIMAL
 #define HPP_HEXADECIMAL
 
+#include <cstdint>
+#include <cstddef>
 #include <string>
 
 std::string toHex(const uint8_t * const s, const size_t len);

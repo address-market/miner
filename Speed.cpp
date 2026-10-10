@@ -31,7 +31,7 @@ Speed::Speed(const unsigned int intervalPrintMs, const unsigned int intervalSamp
 Speed::~Speed() {
 }
 
-void Speed::update(const unsigned int numPoints, const unsigned int indexDevice) {
+void Speed::update(const unsigned long long numPoints, const unsigned int indexDevice) {
 	std::lock_guard<std::recursive_mutex> lockGuard(m_mutex);
 
 	const auto ns = std::chrono::steady_clock::now().time_since_epoch().count();
@@ -74,7 +74,7 @@ double Speed::getSpeed(const sampleList & l) const {
 	return timeDelta == 0.0 ? 0.0 : numPointsSum / (timeDelta / 1000000000.0);
 }
 
-void Speed::updateList(const unsigned int & numPoints, const long long & ns, sampleList & l) {
+void Speed::updateList(const unsigned long long & numPoints, const long long & ns, sampleList & l) {
 	l.push_back(samplePair(ns, numPoints));
 
 	// Pop old samples until time difference between first and last element is less than or equal to m_sampleSeconds

@@ -163,6 +163,7 @@ std::string makePreprocessorInitHashExpression(const std::string & strAddressBin
 	}
 
 	h.b[85] ^= 0x01;
+	h.b[135] ^= 0x80;
 
 	std::ostringstream oss;
 	oss << std::hex;
@@ -343,7 +344,7 @@ int main(int argc, char * * argv) {
 		// Build the program
 		std::cout << "  Building program..." << std::flush;
 
-		const std::string strBuildOptions = "-cl-fast-relaxed-math -cl-mad-enable -cl-no-signed-zeros -D ERADICATE2_MAX_SCORE=" + lexical_cast::write(ERADICATE2_MAX_SCORE) + " -D ERADICATE2_INITHASH=" + strPreprocessorInitStructure;
+		const std::string strBuildOptions = "-cl-fast-relaxed-math -cl-mad-enable -cl-no-signed-zeros -D ERADICATE2_MAX_SCORE=" + lexical_cast::write(ERADICATE2_MAX_SCORE) + " -D ERADICATE2_INITHASH=" + strPreprocessorInitStructure + " -D ERADICATE2_MODE=" + lexical_cast::write(static_cast<int>(mode.function));
 		auto buildWithRetry = [&](const std::string & options) {
 			constexpr int maxAttempts = 3;
 			const auto delay = std::chrono::milliseconds(50);
