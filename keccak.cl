@@ -104,7 +104,7 @@ __constant ulong keccakf_rndc[24] = {
 	#define KECCAK_UNROLL __attribute__((opencl_unroll_hint(1)))
 #else
 	// On NVIDIA/AMD, full unrolling is generally preferred for ILP.
-	#define KECCAK_UNROLL #pragma unroll
+	#define KECCAK_UNROLL _Pragma("unroll")
 #endif
 
 // Barely a bottleneck. No need to tinker more.
