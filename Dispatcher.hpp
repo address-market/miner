@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 #include <mutex>
+#include <chrono>
 
 #if defined(__APPLE__) || defined(__MACOSX)
 #include <OpenCL/cl.h>
@@ -18,7 +19,6 @@
 #include "Speed.hpp"
 #include "types.hpp"
 
-#define ERADICATE2_SPEEDSAMPLES 20
 #define ERADICATE2_MAX_SCORE 40
 
 struct MatchEntry {
@@ -59,13 +59,11 @@ class Dispatcher {
 
 			cl_kernel m_kernelIterate;
 
-			CLMemory<result> m_memResult;
 			CLMemory<mode> m_memMode;
-			CLMemory<cl_uint> m_memHasResult;
+			CLMemory<cl_uint> m_memBest;
 			CLMemory<cl_uint> m_memMatchCount;
 			CLMemory<MatchEntry> m_memMatches;
-			CLMemory<cl_ulong> m_memProgress;
-			
+
 			// Tuning State
 			bool m_isAutoTuning;
 			cl_uint m_bestRounds;
@@ -75,16 +73,17 @@ class Dispatcher {
 
 			cl_uint m_round;
 			cl_uint m_roundsPerKernel;
-			size_t m_dispatchCount;
-			size_t m_pollInterval;
 			cl_ulong m_totalKernelNs;
 			cl_ulong m_totalReadNs;
 			size_t m_kernelProfileCount;
 			size_t m_readProfileCount;
+		};
 
-			// Progress tracking
-			cl_ulong m_lastProgress;
-			bool m_firstProgressUpdate;
+		struct Batch {
+			cl_event kernelEvent;
+			cl_event countEvent;
+			cl_uint matchCount;
+			cl_uint rounds;
 		};
 
 	public:
@@ -96,19 +95,16 @@ class Dispatcher {
 		void enableLeadingThresholdMode(const cl_uchar threshold);
 
 	private:
-		void deviceDispatch(Device & d);
+		void deviceLoop(Device & d);
+		void launchBatch(Device & d, Batch & b);
+		void finishBatch(Device & d, Batch & b);
+		void handleMatches(Device & d);
+		void autoTune(Device & d, const cl_uint rounds);
 
-		void enqueueKernel(cl_command_queue & clQueue, cl_kernel & clKernel, size_t worksizeGlobal, const size_t worksizeLocal, cl_event * pEvent);
-		void enqueueKernelDevice(Device & d, cl_kernel & clKernel, size_t worksizeGlobal, cl_event * pEvent);
+		cl_event enqueueKernel(cl_command_queue & clQueue, cl_kernel & clKernel, size_t worksizeGlobal, const size_t worksizeLocal);
+		cl_event enqueueKernelDevice(Device & d, cl_kernel & clKernel, size_t worksizeGlobal);
 
-		void printSpeed();
 		void printProfilingReport() const;
-
-	private:
-		static void CL_CALLBACK staticCallback(cl_event event, cl_int event_command_exec_status, void * user_data);
-		static void CL_CALLBACK kernelProfilingCallback(cl_event event, cl_int event_command_exec_status, void * user_data);
-
-		static std::string formatSpeed(double s);
 
 	private: /* Instance variables */
 		cl_context & m_clContext;
@@ -119,15 +115,10 @@ class Dispatcher {
 		const cl_uint m_roundsPerKernel;
 		std::vector<Device *> m_vDevices;
 
-		cl_event m_eventFinished;
-
 		// Run information
 		std::mutex m_mutex;
 		std::chrono::time_point<std::chrono::steady_clock> timeStart;
 		Speed m_speed;
-		unsigned int m_countPrint;
-		unsigned int m_countRunning;
-		bool m_quit;
 		bool m_collectAllLeading;
 		cl_uchar m_thresholdScore;
 		bool m_profile;

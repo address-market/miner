@@ -5,13 +5,9 @@
  * https://github.com/llamasoft/xptMiner-gpu/blob/master/opencl/keccak.cl
  */
 
-typedef union {
-	uchar b[200];
-	ulong q[25];
-	uint d[50];
-} ethhash;
+#define ROTL64(x, n) rotate((x), (ulong)(n))
 
-#define TH_ELT_SHORT(t, d, c) t = rotate(d, (ulong) 1) ^ c
+#define TH_ELT_SHORT(t, d, c) t = ROTL64(d, 1) ^ c
 
 #define THETA(s00, s01, s02, s03, s04, \
               s10, s11, s12, s13, s14, \
@@ -44,30 +40,30 @@ typedef union {
               s30, s31, s32, s33, s34, \
               s40, s41, s42, s43, s44) \
 { \
-	t0  = rotate(s10, (ulong) 1);  \
-	s10 = rotate(s11, (ulong)44); \
-	s11 = rotate(s41, (ulong)20); \
-	s41 = rotate(s24, (ulong)61); \
-	s24 = rotate(s42, (ulong)39); \
-	s42 = rotate(s04, (ulong)18); \
-	s04 = rotate(s20, (ulong)62); \
-	s20 = rotate(s22, (ulong)43); \
-	s22 = rotate(s32, (ulong)25); \
-	s32 = rotate(s43, (ulong) 8); \
-	s43 = rotate(s34, (ulong)56); \
-	s34 = rotate(s03, (ulong)41); \
-	s03 = rotate(s40, (ulong)27); \
-	s40 = rotate(s44, (ulong)14); \
-	s44 = rotate(s14, (ulong) 2); \
-	s14 = rotate(s31, (ulong)55); \
-	s31 = rotate(s13, (ulong)45); \
-	s13 = rotate(s01, (ulong)36); \
-	s01 = rotate(s30, (ulong)28); \
-	s30 = rotate(s33, (ulong)21); \
-	s33 = rotate(s23, (ulong)15); \
-	s23 = rotate(s12, (ulong)10); \
-	s12 = rotate(s21, (ulong) 6); \
-	s21 = rotate(s02, (ulong) 3); \
+	t0  = ROTL64(s10, 1);  \
+	s10 = ROTL64(s11, 44); \
+	s11 = ROTL64(s41, 20); \
+	s41 = ROTL64(s24, 61); \
+	s24 = ROTL64(s42, 39); \
+	s42 = ROTL64(s04, 18); \
+	s04 = ROTL64(s20, 62); \
+	s20 = ROTL64(s22, 43); \
+	s22 = ROTL64(s32, 25); \
+	s32 = ROTL64(s43, 8); \
+	s43 = ROTL64(s34, 56); \
+	s34 = ROTL64(s03, 41); \
+	s03 = ROTL64(s40, 27); \
+	s40 = ROTL64(s44, 14); \
+	s44 = ROTL64(s14, 2); \
+	s14 = ROTL64(s31, 55); \
+	s31 = ROTL64(s13, 45); \
+	s13 = ROTL64(s01, 36); \
+	s01 = ROTL64(s30, 28); \
+	s30 = ROTL64(s33, 21); \
+	s33 = ROTL64(s23, 15); \
+	s23 = ROTL64(s12, 10); \
+	s12 = ROTL64(s21, 6); \
+	s21 = ROTL64(s02, 3); \
 	s02 = t0; \
 }
 
@@ -107,11 +103,8 @@ __constant ulong keccakf_rndc[24] = {
 	#define KECCAK_UNROLL _Pragma("unroll")
 #endif
 
-// Barely a bottleneck. No need to tinker more.
-static inline void __attribute__((always_inline)) sha3_keccakf(ethhash * const h)
+static inline void __attribute__((always_inline)) keccakf(ulong * const st)
 {
-	ulong * const st = h->q;
-	h->d[33] ^= 0x80000000;
 	ulong t0, t1, t2, t3, t4, t5;
 
 	// Unrolling and removing PI stage gave negligable performance on GTX 1070.
